@@ -1,0 +1,45 @@
+{
+  "name": "ai-sales-chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^3.0.37",
+    "@ai-sdk/react": "^3.0.113",
+    "@google/generative-ai": "^0.24.1",
+    "@llamaindex/openai": "^0.4.22",
+    "@llamaindex/supabase": "^0.1.23",
+    "@openrouter/sdk": "^0.9.11",
+    "@supabase/ssr": "^0.9.0",
+    "@supabase/supabase-js": "^2.98.0",
+    "ai": "^6.0.111",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "llamaindex": "^0.12.1",
+    "lucide-react": "^0.576.0",
+    "next": "^14.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "recharts": "^3.7.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.0.1",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.0",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.0",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5"
+  }
+}
