@@ -11,6 +11,12 @@ const openrouter = new OpenRouter({
 
 const systemPrompt = `You are an AI sales analyst assistant with access to a REAL sales database.
 
+IMPORTANT - DETECT IRRELEVANT QUERIES:
+If the user's message is NOT related to sales, data, analytics, forecasts, or business insights (e.g., greetings like "hi", "hello", general questions, or off-topic queries), respond ONLY with a friendly introduction:
+"Hello! I'm your AI Sales Analyst Assistant. I can help you analyze sales data, create visualizations, identify trends, and generate forecasts. Try asking me about sales trends, top products, regional performance, or request a chart!"
+
+Do NOT query the database or provide sales data for irrelevant queries.
+
 Database Information:
 - Products: Electronics, Furniture, and Stationery categories
 - Customers: Enterprise, SMB, Individual, and Education segments
@@ -55,66 +61,83 @@ export async function POST(req: Request) {
 
     console.log("Initial AI response:", JSON.stringify(initialCompletion, null, 2).substring(0, 500));
 
+    // STEP 2: Check if query is irrelevant (greetings, off-topic)
+    const irrelevantPatterns = /^(hi|hello|hey|greetings|good morning|good afternoon|good evening|how are you|what's up|sup|yo|what can you do|help|who are you|what are you)[\s\?\!]*$/i;
+    const isIrrelevant = irrelevantPatterns.test(userMessage.trim());
+
     let dataResult: any = null;
     let queryType: "semantic" | "filtered" = "semantic";
     let filterDescription: string | undefined;
 
-    // STEP 2: Check if AI wants to use the tool
-    const choice = initialCompletion.choices?.[0];
-    const toolCalls = choice?.message?.toolCalls;
+    // Only query database if the query is relevant to sales/data
+    if (!isIrrelevant) {
+      // STEP 2: Check if AI wants to use the tool
+      const choice = initialCompletion.choices?.[0];
+      const toolCalls = choice?.message?.toolCalls;
 
-    if (toolCalls && toolCalls.length > 0) {
-      // AI decided to use the tool - execute filtered query
-      console.log("AI decided to call tool - using FILTERED query");
-      queryType = "filtered";
+      if (toolCalls && toolCalls.length > 0) {
+        // AI decided to use the tool - execute filtered query
+        console.log("AI decided to call tool - using FILTERED query");
+        queryType = "filtered";
 
-      const toolCall = toolCalls[0];
-      const toolArgs = parseToolArguments(toolCall.function.arguments);
+        const toolCall = toolCalls[0];
+        const toolArgs = parseToolArguments(toolCall.function.arguments);
 
-      console.log("Tool arguments extracted by AI:", toolArgs);
+        console.log("Tool arguments extracted by AI:", toolArgs);
 
-      // Execute filtered query with AI-extracted parameters
-      dataResult = await executeFilteredQuery(toolArgs);
-      filterDescription = describeToolFilters(toolArgs);
+        // Execute filtered query with AI-extracted parameters
+        dataResult = await executeFilteredQuery(toolArgs);
+        filterDescription = describeToolFilters(toolArgs);
+      } else {
+        // AI didn't call tool - use semantic search
+        console.log("AI didn't call tool - using SEMANTIC search");
+        dataResult = await executeSemanticQuery(userMessage);
+      }
     } else {
-      // AI didn't call tool - use semantic search
-      console.log("AI didn't call tool - using SEMANTIC search");
-      dataResult = await executeSemanticQuery(userMessage);
+      console.log("Irrelevant query detected - skipping database query");
     }
 
     // STEP 3: Build context message with data
     const isChartRequest = /\b(visual|chart|graph|show me|display|plot|visualiz)/i.test(userMessage);
 
-    let contextMessage = "\n\n=== DATABASE DATA ===\n";
+    let contextMessage = "";
 
-    if (queryType === "filtered" && filterDescription) {
-      contextMessage += `Query Type: FILTERED (${filterDescription})\n`;
+    // Only add database context if we have data
+    if (dataResult) {
+      contextMessage = "\n\n=== DATABASE DATA ===\n";
+
+      if (queryType === "filtered" && filterDescription) {
+        contextMessage += `Query Type: FILTERED (${filterDescription})\n`;
+      } else {
+        contextMessage += `Query Type: SEMANTIC SEARCH\n`;
+      }
+
+      contextMessage += `Data Sources: ${dataResult.sources.join(", ")}\n\n`;
+      contextMessage += JSON.stringify(dataResult.relevantData, null, 2);
+      contextMessage += "\n\n";
+
+      if (isChartRequest) {
+        contextMessage += "=== CRITICAL INSTRUCTIONS ===\n";
+        contextMessage += "A chart is being AUTOMATICALLY generated. DO NOT describe the chart or data.\n\n";
+        contextMessage += "Your response MUST:\n";
+        contextMessage += "- Be 1-2 sentences MAXIMUM\n";
+        contextMessage += "- Give ONLY high-level business insight\n";
+        contextMessage += "- Use plain conversational English\n\n";
+        contextMessage += "NEVER include:\n";
+        contextMessage += "- Numbers, percentages, or values\n";
+        contextMessage += "- Month names or dates\n";
+        contextMessage += "- JSON, code, or technical syntax\n";
+        contextMessage += "- Markdown symbols (#, ```, -, *)\n";
+        contextMessage += "- Chart specifications (type, xKey, yKey, etc.)\n";
+        contextMessage += "- Raw data or array contents\n\n";
+        contextMessage += "GOOD: 'The trend shows steady progress with opportunities for growth.'\n";
+        contextMessage += "BAD: 'March 2025 had revenue of $461300' or '```chart' or any technical details.\n";
+      } else {
+        contextMessage += "Analyze this data and provide insights.";
+      }
     } else {
-      contextMessage += `Query Type: SEMANTIC SEARCH\n`;
-    }
-
-    contextMessage += `Data Sources: ${dataResult.sources.join(", ")}\n\n`;
-    contextMessage += JSON.stringify(dataResult.relevantData, null, 2);
-    contextMessage += "\n\n";
-
-    if (isChartRequest) {
-      contextMessage += "=== CRITICAL INSTRUCTIONS ===\n";
-      contextMessage += "A chart is being AUTOMATICALLY generated. DO NOT describe the chart or data.\n\n";
-      contextMessage += "Your response MUST:\n";
-      contextMessage += "- Be 1-2 sentences MAXIMUM\n";
-      contextMessage += "- Give ONLY high-level business insight\n";
-      contextMessage += "- Use plain conversational English\n\n";
-      contextMessage += "NEVER include:\n";
-      contextMessage += "- Numbers, percentages, or values\n";
-      contextMessage += "- Month names or dates\n";
-      contextMessage += "- JSON, code, or technical syntax\n";
-      contextMessage += "- Markdown symbols (#, ```, -, *)\n";
-      contextMessage += "- Chart specifications (type, xKey, yKey, etc.)\n";
-      contextMessage += "- Raw data or array contents\n\n";
-      contextMessage += "GOOD: 'The trend shows steady progress with opportunities for growth.'\n";
-      contextMessage += "BAD: 'March 2025 had revenue of $461300' or '```chart' or any technical details.\n";
-    } else {
-      contextMessage += "Analyze this data and provide insights.";
+      // For irrelevant queries, just ask AI to respond appropriately
+      contextMessage = "\n\nThis query is not related to sales or data analysis. Provide your introduction as instructed in the system prompt.";
     }
 
     // STEP 4: Send data back to AI for final response (with streaming)

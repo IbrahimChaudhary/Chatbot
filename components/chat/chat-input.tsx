@@ -19,16 +19,21 @@ export function ChatInput({
   isLoading,
 }: ChatInputProps) {
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
+    <form onSubmit={handleSubmit} className="flex gap-3">
       <Input
         value={input}
         onChange={handleInputChange}
         placeholder="Ask about sales data, trends, or request charts..."
         disabled={isLoading}
-        className="flex-1"
+        className="flex-1 input-enhanced h-12 px-4 text-base rounded-xl border-2 focus-visible:ring-2 focus-visible:ring-offset-0 shadow-sm"
       />
-      <Button type="submit" disabled={isLoading || !input.trim()}>
-        <Send className="h-4 w-4" />
+      <Button
+        type="submit"
+        disabled={isLoading || !input.trim()}
+        className="button-enhanced h-12 px-6 rounded-xl shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Send className="h-4 w-4 mr-2" />
+        <span className="hidden sm:inline">Send</span>
       </Button>
     </form>
   );

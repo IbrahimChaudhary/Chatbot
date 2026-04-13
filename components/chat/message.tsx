@@ -5,13 +5,15 @@ import { Bot, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { SalesChart } from "@/components/charts/sales-chart";
 import type { ChartData } from "@/lib/types/database";
+import { memo } from "react";
 
 interface MessageProps {
   role: "user" | "assistant";
   content: string;
+  isStreaming?: boolean;
 }
 
-export function Message({ role, content }: MessageProps) {
+function MessageComponent({ role, content, isStreaming = false }: MessageProps) {
   const isUser = role === "user";
 
   // Extract chart blocks from content (flexible whitespace)
@@ -92,14 +94,18 @@ export function Message({ role, content }: MessageProps) {
   return (
     <div
       className={cn(
-        "flex gap-3 p-4 rounded-lg",
-        isUser ? "bg-muted ml-12" : "bg-card mr-12"
+        "flex gap-3 p-5 rounded-xl max-w-[85%] message-bubble animate-fade-in shadow-sm",
+        isUser
+          ? "bg-gradient-to-br from-primary/90 to-primary text-primary-foreground ml-auto flex-row-reverse" // User: right side, reversed layout, gradient
+          : "bg-card/80 backdrop-blur-sm mr-auto border border-border/50" // AI: left side, subtle background
       )}
     >
       <div
         className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          isUser ? "bg-primary text-primary-foreground" : "bg-accent text-accent-foreground"
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-md transition-transform hover:scale-110",
+          isUser
+            ? "bg-primary-foreground/20 text-primary-foreground ring-2 ring-primary-foreground/30"
+            : "bg-gradient-to-br from-accent to-accent/80 text-accent-foreground"
         )}
       >
         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
@@ -107,35 +113,43 @@ export function Message({ role, content }: MessageProps) {
       <div className="flex-1 space-y-4 overflow-hidden">
         {/* Render text content */}
         {textContent.trim() && (
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <ReactMarkdown
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
-                li: ({ children }) => <li className="mb-1">{children}</li>,
-                code: ({ className, children, ...props }) => {
-                  const match = /language-(\w+)/.exec(className || "");
-                  return match ? (
-                    <code className="block bg-muted p-2 rounded text-sm overflow-x-auto" {...props}>
-                      {children}
-                    </code>
-                  ) : (
-                    <code className="bg-muted px-1 py-0.5 rounded text-sm" {...props}>
-                      {children}
-                    </code>
-                  );
-                },
-              }}
-            >
-              {textContent}
-            </ReactMarkdown>
+          <div className={cn(
+            "prose prose-sm max-w-none relative",
+            isUser ? "prose-invert" : "dark:prose-invert"
+          )}>
+            <div className="streaming-text">
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+                  li: ({ children }) => <li className="mb-1">{children}</li>,
+                  code: ({ className, children, ...props }) => {
+                    const match = /language-(\w+)/.exec(className || "");
+                    return match ? (
+                      <code className="block bg-muted/50 p-3 rounded-lg text-sm overflow-x-auto border border-border/30" {...props}>
+                        {children}
+                      </code>
+                    ) : (
+                      <code className="bg-muted/70 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+                        {children}
+                      </code>
+                    );
+                  },
+                }}
+              >
+                {textContent}
+              </ReactMarkdown>
+              {isStreaming && !isUser && (
+                <span className="typing-cursor inline-block ml-0.5 w-[2px] h-4 bg-foreground animate-blink align-middle"></span>
+              )}
+            </div>
           </div>
         )}
 
         {/* Render charts */}
         {charts.map((chartData, index) => (
-          <div key={index} className="my-4">
+          <div key={index} className="my-4 rounded-lg overflow-hidden">
             <SalesChart chartData={chartData} />
           </div>
         ))}
@@ -143,3 +157,13 @@ export function Message({ role, content }: MessageProps) {
     </div>
   );
 }
+
+// Memoize to prevent unnecessary re-renders of previous messages
+export const Message = memo(MessageComponent, (prevProps, nextProps) => {
+  // Only re-render if content or streaming status changes
+  return (
+    prevProps.content === nextProps.content &&
+    prevProps.isStreaming === nextProps.isStreaming &&
+    prevProps.role === nextProps.role
+  );
+});

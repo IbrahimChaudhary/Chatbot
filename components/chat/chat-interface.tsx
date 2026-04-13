@@ -2,9 +2,10 @@
 
 import { Message } from "./message";
 import { ChatInput } from "./chat-input";
+import { AnimatedLoading } from "./animated-loading";
+import { AnimatedBackground } from "@/components/animated-background";
 import { Card } from "@/components/ui/card";
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
 
 interface ChatMessage {
   id: string;
@@ -17,14 +18,69 @@ export function ChatInterface() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [hasGreeted, setHasGreeted] = useState(false);
+  const [isGreetingStreaming, setIsGreetingStreaming] = useState(false);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Smooth scroll during streaming (but not during greeting)
+  useEffect(() => {
+    if (isLoading && !isGreetingStreaming) {
+      const scrollInterval = setInterval(scrollToBottom, 100);
+      return () => clearInterval(scrollInterval);
+    }
+  }, [isLoading, isGreetingStreaming]);
+
+  // Add automatic greeting when chat first loads with streaming effect
+  useEffect(() => {
+    if (!hasGreeted && messages.length === 0) {
+      const greetingText = "Hello! I'm your AI Sales Analyst Assistant. I can help you analyze sales data, create visualizations, identify trends, and generate forecasts.\n\nTry asking me:\n- \"Show me sales trends for the last 6 months\"\n- \"What are the top-selling categories?\"\n- \"Show regional sales breakdown as a pie chart\"\n- \"Analyze Electronics sales in North America\"\n\nWhat would you like to know?";
+
+      const greetingId = "initial-greeting";
+
+      // Start with empty message
+      setMessages([{
+        id: greetingId,
+        role: "assistant",
+        content: "",
+      }]);
+      setIsGreetingStreaming(true);
+
+      // Stream the greeting character by character
+      let currentIndex = 0;
+      const streamGreeting = () => {
+        if (currentIndex < greetingText.length) {
+          // Add 2-4 characters at a time for smoother streaming
+          const charsToAdd = Math.min(3, greetingText.length - currentIndex);
+          currentIndex += charsToAdd;
+
+          setMessages([{
+            id: greetingId,
+            role: "assistant",
+            content: greetingText.substring(0, currentIndex),
+          }]);
+
+          // Continue streaming with smooth timing (15ms per chunk)
+          requestAnimationFrame(() => {
+            setTimeout(streamGreeting, 15);
+          });
+        } else {
+          // Streaming complete
+          setIsGreetingStreaming(false);
+          setHasGreeted(true);
+        }
+      };
+
+      // Start streaming after a short delay
+      setTimeout(streamGreeting, 300);
+    }
+  }, [hasGreeted, messages.length]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInput(e.target.value);
@@ -40,7 +96,18 @@ export function ChatInterface() {
       content: input,
     };
 
-    const newMessages = [...messages, userMessage];
+    const assistantMessageId = (Date.now() + 1).toString();
+
+    // Add user message AND empty assistant message immediately
+    const newMessages = [
+      ...messages,
+      userMessage,
+      {
+        id: assistantMessageId,
+        role: "assistant" as const,
+        content: "", // Empty content, will show loading animation
+      },
+    ];
     setMessages(newMessages);
     setInput("");
     setIsLoading(true);
@@ -52,7 +119,10 @@ export function ChatInterface() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: newMessages.map((m) => ({
+          messages: [
+            ...messages,
+            userMessage,
+          ].map((m) => ({
             role: m.role,
             content: m.content,
           })),
@@ -66,12 +136,46 @@ export function ChatInterface() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = "";
-      const assistantMessageId = (Date.now() + 1).toString();
+      let pendingUpdate = "";
+      let isUpdating = false;
+      let hasStartedStreaming = false;
+
+      // Smooth update function with throttling
+      const updateMessage = () => {
+        if (pendingUpdate) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMessageId
+                ? { ...m, content: pendingUpdate }
+                : m
+            )
+          );
+        }
+        isUpdating = false;
+      };
+
+      // Throttled update - only update UI every 30ms for smoothness
+      // First update is immediate to show transition from animation
+      const scheduleUpdate = (isFirstUpdate = false) => {
+        if (isFirstUpdate) {
+          // First update happens immediately for smooth transition
+          updateMessage();
+        } else if (!isUpdating) {
+          isUpdating = true;
+          requestAnimationFrame(() => {
+            setTimeout(updateMessage, 30);
+          });
+        }
+      };
 
       if (reader) {
         while (true) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done) {
+            // Final update to ensure all content is displayed
+            updateMessage();
+            break;
+          }
 
           const chunk = decoder.decode(value);
           const lines = chunk.split("\n");
@@ -81,6 +185,10 @@ export function ChatInterface() {
               // Extract content after "0:" prefix
               let content = line.substring(2);
 
+              // Mark that streaming has started (for hiding loading animation)
+              if (content.trim() && !hasStartedStreaming) {
+                hasStartedStreaming = true;
+              }
 
               // Try to parse as JSON to handle escaped characters
               try {
@@ -102,85 +210,97 @@ export function ChatInterface() {
               }
 
               assistantMessage += content;
+              pendingUpdate = assistantMessage;
 
-              setMessages((prev) => {
-                const withoutLast = prev.filter((m) => m.id !== assistantMessageId);
-                const newMessage = {
-                  id: assistantMessageId,
-                  role: "assistant" as const,
-                  content: assistantMessage,
-                };
-
-
-                return [...withoutLast, newMessage];
-              });
+              // Schedule throttled update
+              scheduleUpdate();
             }
           }
         }
       }
     } catch (error) {
       console.error("Error:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          role: "assistant",
-          content: "Sorry, I encountered an error. Please try again.",
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMessageId
+            ? { ...m, content: "Sorry, I encountered an error. Please try again." }
+            : m
+        )
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-screen max-w-5xl mx-auto p-4">
-      {/* Header */}
-      <div className="mb-4">
-        <h1 className="text-3xl font-bold">AI Sales Analyst</h1>
-        <p className="text-muted-foreground">
-          Ask questions about sales data, request forecasts, or create visualizations
-        </p>
-      </div>
+    <>
+      <AnimatedBackground />
+      <div className="flex flex-col h-screen max-w-5xl mx-auto p-4 md:p-6 relative z-10">
+        {/* Header */}
+        <div className="mb-6 animate-slide-up">
+          <h1 className="text-4xl font-bold gradient-text mb-2">AI Sales Analyst</h1>
+          <p className="text-muted-foreground text-sm">
+            Ask questions about sales data, request forecasts, or create visualizations
+          </p>
+        </div>
 
-      {/* Messages Container */}
-      <Card className="flex-1 overflow-y-auto p-4 space-y-4 mb-4">
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
-            <div className="text-muted-foreground">
-              <p className="text-lg font-medium mb-2">Welcome! Try asking:</p>
-              <div className="space-y-2 text-sm">
-                <p>"Show me sales trends for the last 6 months"</p>
-                <p>"What are the top-selling categories?"</p>
-                <p>"Forecast next quarter's revenue"</p>
-                <p>"Show regional sales breakdown as a pie chart"</p>
-                <p>"Detect any anomalies in recent sales"</p>
-              </div>
+        {/* Messages Container */}
+        <Card className="flex-1 overflow-y-auto p-6 space-y-4 mb-4 card-enhanced custom-scrollbar shadow-lg">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
             </div>
-          </div>
-        ) : (
-          <>
-            {messages.map((message) => (
-              <Message key={message.id} role={message.role} content={message.content} />
-            ))}
-            {isLoading && (
-              <div className="flex items-center gap-2 text-muted-foreground p-4">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Analyzing data...</span>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </>
-        )}
-      </Card>
+          ) : (
+            <>
+              {messages.map((message, index) => {
+                const isLastMessage = index === messages.length - 1;
+                const isEmptyAssistantMessage = message.role === "assistant" && !message.content;
 
-      {/* Input */}
-      <ChatInput
-        input={input}
-        handleInputChange={handleInputChange}
-        handleSubmit={handleSubmit}
-        isLoading={isLoading}
-      />
-    </div>
+                // Show loading animation ONLY when message is empty (before streaming starts)
+                const showLoading = isLastMessage && isEmptyAssistantMessage && isLoading && !isGreetingStreaming;
+
+                // Show streaming cursor when message has content AND streaming is active
+                const isCurrentlyStreaming = isLastMessage && message.role === "assistant" && isLoading && !!message.content && !isGreetingStreaming;
+
+                // Don't render empty assistant messages during greeting streaming
+                if (isEmptyAssistantMessage && isGreetingStreaming) {
+                  return null;
+                }
+
+                // Show loading animation for empty messages (waiting for stream to start)
+                if (isEmptyAssistantMessage && showLoading) {
+                  return <AnimatedLoading key={message.id} />;
+                }
+
+                // Skip rendering empty messages without loading
+                if (isEmptyAssistantMessage) {
+                  return null;
+                }
+
+                // Render message with streaming cursor if actively streaming
+                return (
+                  <Message
+                    key={message.id}
+                    role={message.role}
+                    content={message.content}
+                    isStreaming={isCurrentlyStreaming}
+                  />
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+        </Card>
+
+        {/* Input */}
+        <div className="animate-fade-in">
+          <ChatInput
+            input={input}
+            handleInputChange={handleInputChange}
+            handleSubmit={handleSubmit}
+            isLoading={isLoading}
+          />
+        </div>
+      </div>
+    </>
   );
 }
