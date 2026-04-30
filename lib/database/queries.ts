@@ -1,5 +1,31 @@
-import { createClient } from "@/lib/supabase/server";
-import type { SalesTransaction, SalesTrend, SalesSummary } from "@/lib/types/database";
+import { getDb } from "@/lib/mongodb/client";
+import type {
+  SalesTransaction,
+  SalesTrend,
+  SalesSummary,
+} from "@/lib/types/database";
+
+function buildMatchStage(filters?: {
+  category?: string;
+  region?: string;
+  customer_segment?: string;
+  startDate?: string;
+  endDate?: string;
+}): Record<string, any> {
+  const match: Record<string, any> = {};
+
+  if (filters?.category) match["product.category"] = filters.category;
+  if (filters?.region) match.region = filters.region;
+  if (filters?.customer_segment) match.customerSegment = filters.customer_segment;
+
+  if (filters?.startDate || filters?.endDate) {
+    match.transactionDate = {};
+    if (filters.startDate) match.transactionDate.$gte = new Date(filters.startDate);
+    if (filters.endDate) match.transactionDate.$lte = new Date(filters.endDate);
+  }
+
+  return match;
+}
 
 export async function getSalesTransactions(
   limit: number = 100,
@@ -10,64 +36,101 @@ export async function getSalesTransactions(
     startDate?: string;
     endDate?: string;
   }
-) {
-  const supabase = await createClient();
+): Promise<SalesTransaction[]> {
+  const db = await getDb();
+  const match = buildMatchStage(filters);
 
-  let query = supabase
-    .from("sales_transactions")
-    .select("*")
-    .order("transaction_date", { ascending: false })
-    .limit(limit);
+  const docs = await db
+    .collection("sales_transactions")
+    .find(match)
+    .sort({ transactionDate: -1 })
+    .limit(limit)
+    .toArray();
 
-  if (filters?.category) {
-    query = query.eq("category", filters.category);
-  }
-  if (filters?.region) {
-    query = query.eq("region", filters.region);
-  }
-  if (filters?.customer_segment) {
-    query = query.eq("customer_segment", filters.customer_segment);
-  }
-  if (filters?.startDate) {
-    query = query.gte("transaction_date", filters.startDate);
-  }
-  if (filters?.endDate) {
-    query = query.lte("transaction_date", filters.endDate);
-  }
-
-  const { data, error } = await query;
-
-  if (error) throw error;
-  return data as SalesTransaction[];
+  return docs as unknown as SalesTransaction[];
 }
 
 export async function getSalesTrend(
   category?: string,
   region?: string,
   months: number = 12
-) {
-  const supabase = await createClient();
+): Promise<SalesTrend[]> {
+  const db = await getDb();
 
-  const { data, error } = await supabase.rpc("get_sales_trend", {
-    p_category: category || null,
-    p_region: region || null,
-    p_months: months,
-  });
+  const startDate = new Date();
+  startDate.setMonth(startDate.getMonth() - months);
 
-  if (error) throw error;
-  return data as SalesTrend[];
+  const match: Record<string, any> = {
+    transactionDate: { $gte: startDate },
+  };
+  if (category) match["product.category"] = category;
+  if (region) match.region = region;
+
+  const pipeline = [
+    { $match: match },
+    {
+      $group: {
+        _id: { $dateToString: { format: "%Y-%m", date: "$transactionDate" } },
+        revenue: { $sum: "$totalAmount" },
+        transaction_count: { $sum: 1 },
+      },
+    },
+    { $sort: { _id: 1 } },
+    {
+      $project: {
+        _id: 0,
+        month: "$_id",
+        revenue: { $round: ["$revenue", 2] },
+        transaction_count: 1,
+      },
+    },
+  ];
+
+  return db
+    .collection("sales_transactions")
+    .aggregate<SalesTrend>(pipeline)
+    .toArray();
 }
 
-export async function getSalesSummary(limit: number = 50) {
-  const supabase = await createClient();
+export async function getSalesSummary(limit: number = 50): Promise<SalesSummary[]> {
+  const db = await getDb();
 
-  const { data, error } = await supabase
-    .from("sales_summary")
-    .select("*")
-    .limit(limit);
+  const pipeline = [
+    {
+      $group: {
+        _id: {
+          month: { $dateToString: { format: "%Y-%m", date: "$transactionDate" } },
+          category: "$product.category",
+          region: "$region",
+          customer_segment: "$customerSegment",
+        },
+        transaction_count: { $sum: 1 },
+        total_units_sold: { $sum: "$quantity" },
+        total_revenue: { $sum: "$totalAmount" },
+        avg_transaction_value: { $avg: "$totalAmount" },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        month: "$_id.month",
+        category: "$_id.category",
+        region: "$_id.region",
+        customer_segment: "$_id.customer_segment",
+        transaction_count: 1,
+        total_units_sold: 1,
+        total_revenue: { $round: ["$total_revenue", 2] },
+        avg_transaction_value: { $round: ["$avg_transaction_value", 2] },
+      },
+    },
+    { $sort: { month: -1, total_revenue: -1 } },
+    { $limit: limit },
+  ];
 
-  if (error) throw error;
-  return data as SalesSummary[];
+  return db
+    .collection("sales_transactions")
+    .aggregate<SalesSummary>(pipeline)
+    .toArray();
 }
 
 export async function getTotalRevenue(filters?: {
@@ -75,98 +138,53 @@ export async function getTotalRevenue(filters?: {
   region?: string;
   startDate?: string;
   endDate?: string;
-}) {
-  const supabase = await createClient();
+}): Promise<number> {
+  const db = await getDb();
+  const match = buildMatchStage(filters);
 
-  let query = supabase
-    .from("sales_transactions")
-    .select("total_amount");
+  const result = await db
+    .collection("sales_transactions")
+    .aggregate<{ total: number }>([
+      { $match: match },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+    ])
+    .toArray();
 
-  if (filters?.category) {
-    query = query.eq("category", filters.category);
-  }
-  if (filters?.region) {
-    query = query.eq("region", filters.region);
-  }
-  if (filters?.startDate) {
-    query = query.gte("transaction_date", filters.startDate);
-  }
-  if (filters?.endDate) {
-    query = query.lte("transaction_date", filters.endDate);
-  }
-
-  const { data, error } = await query;
-
-  if (error) throw error;
-
-  const total = data?.reduce((sum, item) => sum + Number(item.total_amount), 0) || 0;
-  return total;
+  return result[0]?.total ?? 0;
 }
 
 export async function getCategoryBreakdown(filters?: {
   startDate?: string;
   endDate?: string;
-}) {
-  const supabase = await createClient();
+}): Promise<{ name: string; value: number }[]> {
+  const db = await getDb();
+  const match = buildMatchStage(filters);
 
-  let query = supabase
-    .from("sales_transactions")
-    .select("category, total_amount");
-
-  if (filters?.startDate) {
-    query = query.gte("transaction_date", filters.startDate);
-  }
-  if (filters?.endDate) {
-    query = query.lte("transaction_date", filters.endDate);
-  }
-
-  const { data, error } = await query;
-
-  if (error) throw error;
-
-  // Aggregate by category
-  const categoryMap = new Map<string, number>();
-  data?.forEach((item) => {
-    const current = categoryMap.get(item.category) || 0;
-    categoryMap.set(item.category, current + Number(item.total_amount));
-  });
-
-  return Array.from(categoryMap.entries()).map(([name, value]) => ({
-    name,
-    value,
-  }));
+  return db
+    .collection("sales_transactions")
+    .aggregate<{ name: string; value: number }>([
+      { $match: match },
+      { $group: { _id: "$product.category", value: { $sum: "$totalAmount" } } },
+      { $project: { _id: 0, name: "$_id", value: { $round: ["$value", 2] } } },
+      { $sort: { value: -1 } },
+    ])
+    .toArray();
 }
 
 export async function getRegionalSales(filters?: {
   startDate?: string;
   endDate?: string;
-}) {
-  const supabase = await createClient();
+}): Promise<{ name: string; value: number }[]> {
+  const db = await getDb();
+  const match = buildMatchStage(filters);
 
-  let query = supabase
-    .from("sales_transactions")
-    .select("region, total_amount");
-
-  if (filters?.startDate) {
-    query = query.gte("transaction_date", filters.startDate);
-  }
-  if (filters?.endDate) {
-    query = query.lte("transaction_date", filters.endDate);
-  }
-
-  const { data, error } = await query;
-
-  if (error) throw error;
-
-  // Aggregate by region
-  const regionMap = new Map<string, number>();
-  data?.forEach((item) => {
-    const current = regionMap.get(item.region) || 0;
-    regionMap.set(item.region, current + Number(item.total_amount));
-  });
-
-  return Array.from(regionMap.entries()).map(([name, value]) => ({
-    name,
-    value,
-  }));
+  return db
+    .collection("sales_transactions")
+    .aggregate<{ name: string; value: number }>([
+      { $match: match },
+      { $group: { _id: "$region", value: { $sum: "$totalAmount" } } },
+      { $project: { _id: 0, name: "$_id", value: { $round: ["$value", 2] } } },
+      { $sort: { value: -1 } },
+    ])
+    .toArray();
 }

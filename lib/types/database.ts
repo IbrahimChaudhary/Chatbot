@@ -1,33 +1,38 @@
+import { ObjectId } from "mongodb";
+
 export interface Product {
-  id: number;
+  _id: ObjectId;
   name: string;
   category: string;
   price: number;
-  created_at: string;
+  createdAt: Date;
 }
 
 export interface SalesTransaction {
-  id: number;
-  transaction_date: string;
-  product_id: number;
-  product_name: string;
-  category: string;
+  _id: ObjectId;
+  transactionDate: Date;
+  product: {
+    id: ObjectId;
+    name: string;
+    category: string;
+  };
   quantity: number;
-  unit_price: number;
-  total_amount: number;
-  customer_segment: string;
+  unitPrice: number;
+  totalAmount: number;
+  customerSegment: string;
   region: string;
-  created_at: string;
+  createdAt: Date;
 }
 
 export interface DocumentEmbedding {
-  id: number;
+  _id: ObjectId;
   content: string;
   embedding: number[] | null;
   metadata: Record<string, any> | null;
-  created_at: string;
+  createdAt: Date;
 }
 
+// Query result shapes — unchanged
 export interface SalesSummary {
   month: string;
   category: string;

@@ -1,11 +1,11 @@
-import {
-  VectorStoreIndex,
-  Document,
-  Settings,
-} from "llamaindex";
+import { VectorStoreIndex, Document, Settings } from "llamaindex";
 import { OpenAI } from "@llamaindex/openai";
-import { getEmbeddingModel } from "./vector-store";
-import { getSalesTransactions, getSalesTrend, getCategoryBreakdown } from "@/lib/database/queries";
+import { getEmbeddingModel } from "./embedding";
+import {
+  getSalesTransactions,
+  getSalesTrend,
+  getCategoryBreakdown,
+} from "@/lib/database/queries";
 
 // Configure LlamaIndex settings
 Settings.llm = new OpenAI({
@@ -30,7 +30,10 @@ export async function createSalesDocuments() {
     const salesTrend = await getSalesTrend(undefined, undefined, 12);
     if (salesTrend && salesTrend.length > 0) {
       const trendText = `Sales Trend Data (Last 12 Months):\n${salesTrend
-        .map((t) => `Month: ${t.month}, Revenue: $${t.revenue}, Transactions: ${t.transaction_count}`)
+        .map(
+          (t) =>
+            `Month: ${t.month}, Revenue: $${t.revenue}, Transactions: ${t.transaction_count}`,
+        )
         .join("\n")}`;
 
       documents.push(
@@ -41,7 +44,7 @@ export async function createSalesDocuments() {
             period: "12_months",
             record_count: salesTrend.length,
           },
-        })
+        }),
       );
     }
 
@@ -59,7 +62,7 @@ export async function createSalesDocuments() {
             type: "category_breakdown",
             record_count: categories.length,
           },
-        })
+        }),
       );
     }
 
@@ -70,18 +73,21 @@ export async function createSalesDocuments() {
         .slice(0, 10)
         .map(
           (t) =>
-            `Date: ${t.transaction_date}, Product: ${t.product_name}, Amount: $${t.total_amount}, Region: ${t.region}`
+            `Date: ${t.transactionDate.toISOString().split("T")[0]}, Product: ${t.product.name}, Amount: $${t.totalAmount}, Region: ${t.region}`,
         )
         .join("\n")}`;
 
       documents.push(
         new Document({
-          text: transactionText + "\n\nRAW_DATA:" + JSON.stringify(transactions.slice(0, 20)),
+          text:
+            transactionText +
+            "\n\nRAW_DATA:" +
+            JSON.stringify(transactions.slice(0, 20)),
           metadata: {
             type: "transactions",
             record_count: transactions.length,
           },
-        })
+        }),
       );
     }
 
@@ -135,7 +141,11 @@ export async function querySalesData(query: string) {
 
     for (const type of typesArray) {
       if (type === "sales_trend") {
-        relevantData.sales_trend = await getSalesTrend(undefined, undefined, 12);
+        relevantData.sales_trend = await getSalesTrend(
+          undefined,
+          undefined,
+          12,
+        );
         sources.push("sales_trend");
       } else if (type === "category_breakdown") {
         relevantData.category_breakdown = await getCategoryBreakdown();
@@ -154,4 +164,4 @@ export async function querySalesData(query: string) {
     console.error("Error querying sales data:", error);
     return null;
   }
-} 
+}
