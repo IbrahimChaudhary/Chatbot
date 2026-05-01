@@ -49,6 +49,24 @@ export function SalesChart({ chartData }: SalesChartProps) {
     },
   };
 
+  function formatCompactNumber(value: number): string {
+  if (value === 0) return "0";
+  
+  const absValue = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+
+  if (absValue >= 1_000_000_000) {
+    return `${sign}${(absValue / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
+  }
+  if (absValue >= 1_000_000) {
+    return `${sign}${(absValue / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (absValue >= 1_000) {
+    return `${sign}${(absValue / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  }
+  return `${sign}${absValue}`;
+}
+
   const renderChart = () => {
     switch (type) {
       case "line":
@@ -64,7 +82,10 @@ export function SalesChart({ chartData }: SalesChartProps) {
                   return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
                 }}
               />
-              <YAxis className="text-xs" />
+              <YAxis 
+  className="text-xs" 
+  tickFormatter={formatCompactNumber}
+/>
               <ChartTooltip content={<ChartTooltipContent />} />
               <Legend />
               <Line
@@ -90,7 +111,10 @@ export function SalesChart({ chartData }: SalesChartProps) {
                 textAnchor="end"
                 height={80}
               />
-              <YAxis className="text-xs" />
+              <YAxis 
+  className="text-xs" 
+  tickFormatter={formatCompactNumber}
+/>
               <ChartTooltip content={<ChartTooltipContent />} />
               <Legend />
               <Bar dataKey={yKey || "value"} fill={COLORS[0]} radius={[8, 8, 0, 0]} />
@@ -117,7 +141,10 @@ export function SalesChart({ chartData }: SalesChartProps) {
                   return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
                 }}
               />
-              <YAxis className="text-xs" />
+              <YAxis 
+  className="text-xs" 
+  tickFormatter={formatCompactNumber}
+/>
               <ChartTooltip content={<ChartTooltipContent />} />
               <Legend />
               <Area
